@@ -1,0 +1,111 @@
+name: Publish DuoMove v0.2.0
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/publish-v0.2.0.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: publish-duomove-v0.2.0
+  cancel-in-progress: false
+jobs:
+  publish:
+    if: github.repository == 'seo-ai-infrastructure/duomove' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      actions: read
+    env:
+      GH_REPO: seo-ai-infrastructure/duomove
+      SOURCE_SHA: 018dc25fe93d2b045be22b80310e3d5f822c7491
+      BUILD_RUN_ID: '34964006610'
+      ARTIFACT_ID: '10395055167'
+      TAG: v0.2.0
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: 018dc25fe93d2b045be22b80310e3d5f822c7491
+          persist-credentials: false
+      - name: Verify successful source build and download exact tested artifact
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          gh api "repos/$GH_REPO/actions/runs/$BUILD_RUN_ID" > /tmp/source-run.json
+          python3 - <<'PY'
+          import json,os
+          run=json.load(open('/tmp/source-run.json'))
+          assert run['status']=='completed' and run['conclusion']=='success'
+          assert run['head_sha']==os.environ['SOURCE_SHA']
+          assert run['head_repository']['full_name']==os.environ['GH_REPO']
+          PY
+          gh api "repos/$GH_REPO/actions/artifacts/$ARTIFACT_ID/zip" > /tmp/apks.zip
+          echo '4155a92eed4456e699134ec0e525c028a269fd5a08425300ba1a327b43e63a20  /tmp/apks.zip' | sha256sum -c -
+          python3 - <<'PY'
+          import zipfile,pathlib,hashlib
+          expected={'site-fix-debug.apk':'f39e7b3e317d8c9278cf68cfac198b451bb93646837704c3454536a00a5660d4',
+                    'duomove-checker-debug.apk':'e4acd1f547a811ea704c9a84a86bf4a8670d2876818b4af4b1b6f9ddd2ac312c'}
+          out=pathlib.Path('release-output');out.mkdir()
+          with zipfile.ZipFile('/tmp/apks.zip') as z:
+              assert len(z.namelist())==3 and set(z.namelist())==set(expected)|{'SHA256SUMS'}
+              for name,digest in expected.items():
+                  data=z.read(name)
+                  assert hashlib.sha256(data).hexdigest()==digest
+                  (out/name).write_bytes(data)
+          PY
+      - name: Package self-contained source with hash-verified vendor build inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --proto '=https' --max-time 120 \
+            'https://resource-wangsu.helplook.net/docker_production/wkpufm/article/wXQ8ezGk/attachments/dplus_demo.zip' \
+            --output /tmp/dplus_demo.zip
+          python3 tools/prepare_dplus_kit.py /tmp/dplus_demo.zip
+          python3 - <<'PY'
+          import pathlib,subprocess,zipfile
+          from tools.prepare_dplus_kit import EXPECTED
+          tracked=subprocess.check_output(['git','ls-files','-z']).decode().split('\0')
+          paths=set(filter(None,tracked))|{'android/site-fix/'+name for name in EXPECTED}
+          paths.add('android/site-fix/gradle/wrapper/gradle-wrapper.properties')
+          with zipfile.ZipFile('release-output/duomove-v0.2.0-source.zip','w',zipfile.ZIP_DEFLATED) as z:
+              for name in sorted(paths):
+                  p=pathlib.Path(name)
+                  assert p.is_file() and not p.is_symlink()
+                  assert '.git' not in p.parts and name != '.env'
+                  z.write(p,'duomove/'+name)
+          PY
+          (cd release-output && sha256sum *.apk *.zip > SHA256SUMS)
+          cat > release-notes.md <<'NOTES'
+          ## DuoMove v0.2.0 — experimental checker kit and Python probe
+
+          Includes the Python probe service/CLI, Railway Docker packaging, the Java-only site_fix Dplus module, owned checker APK, atomic file publisher, tests and build instructions.
+
+          **These are the exact APKs from successful Android build 34964006610**, not newly signed replacements. Source commit: 018dc25fe93d2b045be22b80310e3d5f822c7491.
+
+          Download duomove-v0.2.0-source.zip for the self-contained project including hash-verified vendor bridge and Gradle wrapper inputs. GitHub's automatic source archives contain tracked files only; run tools/prepare_dplus_kit.py when using those archives.
+
+          The module targets only net.stakeout.duomove.checker. No GMS/Chrome/Maps targeting, sensor injection, system location writer or mock-flag concealment. The checker uses synthetic Location objects. The Railway service is probe-only and has no automatic phone actions.
+
+          Unit tests and builds have passed; **actual Dplus loading and getter behavior on a DuoPlus phone are not yet verified**. This is not the complete still/fidget/walk/drive fleet controller.
+
+          Both APKs are debug test builds. Compare SHA256SUMS before installation. Install the checker with adb install; load site-fix-debug.apk using dplus install. See android/site-fix/README.md for prerequisites, testing and cleanup.
+          NOTES
+      - name: Publish immutable-in-practice release assets without overwriting an existing release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --repo "$GH_REPO" --json tagName > /dev/null 2>&1; then
+            echo 'Release already exists; no tag or asset will be overwritten.'
+            gh release view "$TAG" --repo "$GH_REPO" --json url,assets,targetCommitish
+            exit 0
+          fi
+          gh release create "$TAG" release-output/* --repo "$GH_REPO" \
+            --target "$SOURCE_SHA" --title 'DuoMove v0.2.0 — experimental checker kit' \
+            --prerelease --notes-file release-notes.md
+          gh release view "$TAG" --repo "$GH_REPO" --json url,assets,targetCommitish,isPrerelease
