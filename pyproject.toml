@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools==82.0.1"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "duomove"
+version = "0.1.0"
+description = "Read-only Android capability probe and Python runtime foundation for DuoMove"
+requires-python = ">=3.12"
+dependencies = ["fastapi==0.128.2", "uvicorn==0.48.0"]
+
+[project.optional-dependencies]
+test = ["pytest==9.0.2", "httpx==0.28.1"]
+
+[project.scripts]
+duomove = "duomove.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
