@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "generation": 1,
+  "sequence": 1,
+  "ttl_ms": 10000,
+  "lat": 28.0444,
+  "lon": -81.9498,
+  "accuracy": 10.0,
+  "alt": 59.2,
+  "altitude_datum": "WGS84_ELLIPSOID",
+  "speed": 0.0,
+  "bearing": null
+}

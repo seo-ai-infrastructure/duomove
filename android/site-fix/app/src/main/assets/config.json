@@ -1,0 +1,8 @@
+{
+  "name": "site_fix",
+  "package": "com.example.dplus_demo",
+  "desc": "Checker-only synthetic Location getters from app-private fix.json",
+  "type": "user",
+  "ishook": true,
+  "pattern": ["net.stakeout.duomove.checker"]
+}

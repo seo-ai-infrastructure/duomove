@@ -1,0 +1,56 @@
+name: Site Fix Android Build
+on:
+  push:
+    branches: [feat/checker-site-fix]
+  pull_request:
+    paths: ['android/site-fix/**', 'tools/**', '.github/workflows/site-fix.yml']
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Core and publisher tests
+        run: python3 -m unittest discover -s tools/tests -v
+      - name: Fetch documented vendor kit and verify selected inputs
+        run: |
+          curl --fail --location --proto '=https' --max-time 120 \
+            'https://resource-wangsu.helplook.net/docker_production/wkpufm/article/wXQ8ezGk/attachments/dplus_demo.zip' \
+            --output /tmp/dplus_demo.zip
+          python3 tools/prepare_dplus_kit.py /tmp/dplus_demo.zip
+      - name: SDK and Gradle build
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-34' 'build-tools;34.0.0'
+          cd android/site-fix
+          # Official distribution checksum fetched over HTTPS, then enforced by the wrapper.
+          SUM=$(curl --fail --location --proto '=https' --max-time 30 https://services.gradle.org/distributions/gradle-8.7-bin.zip.sha256)
+          [[ "$SUM" =~ ^[a-f0-9]{64}$ ]]
+          printf '\ndistributionSha256Sum=%s\n' "$SUM" >> gradle/wrapper/gradle-wrapper.properties
+          ./gradlew --no-daemon :core:fixtureTest :app:assembleDebug :checker:assembleDebug
+      - name: Inspect and stage APKs
+        run: |
+          mkdir -p apk-output
+          cp android/site-fix/app/build/outputs/apk/debug/app-debug.apk apk-output/site-fix-debug.apk
+          cp android/site-fix/checker/build/outputs/apk/debug/checker-debug.apk apk-output/duomove-checker-debug.apk
+          python3 - <<'PY'
+          import zipfile,json
+          with zipfile.ZipFile('apk-output/site-fix-debug.apk') as z:
+              c=json.loads(z.read('assets/config.json'))
+              assert c['ishook'] and c['pattern']==['net.stakeout.duomove.checker'] and 'libs' not in c
+              assert not any(n.startswith('lib/') for n in z.namelist())
+          PY
+          (cd apk-output && sha256sum *.apk > SHA256SUMS)
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: duomove-site-fix-debug-apks
+          path: apk-output/
+          if-no-files-found: error
+          retention-days: 7
