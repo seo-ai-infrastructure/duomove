@@ -1,0 +1,14 @@
+.git
+.github
+.venv
+.env
+.env.*
+.android
+**/__pycache__
+*.pyc
+*.pem
+*.key
+data
+reports
+artifacts
+*.zip
